@@ -26,8 +26,7 @@ let rec eval env = function
   | AST.Set (n, v) ->
       (try (NameMap.find n !env) := (eval env v)
        with Not_found ->
-         Value.fail
-           Names.e_name ("name " ^ (Name.to_string n) ^ " not found"));
+         Value.fail Names.e_name (Name.to_string n));
       Value.None
   | AST.Undef n ->
       env := NameMap.remove n !env;
