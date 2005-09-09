@@ -25,4 +25,5 @@ module Names = struct
   let e_field_nf = Name.of_string "FieldNotFound"
   let e_index_nf = Name.of_string "IndexNotFound"
   let e_value_nf = Name.of_string "ValueNotFound"
+  let e_eval = Name.of_string "EvalError"
 end
