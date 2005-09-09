@@ -43,24 +43,48 @@ let arith_binary float_op =
             | _ -> Value.fail Names.e_type "arguments must be numbers" in
         Value.Float (float_op x y)))
 
+(* thanks to extlib *)
 let string_find str sub =
   let sublen = String.length sub in
-   if sublen = 0 then
+    if sublen = 0 then
       0
-   else
-     let found = ref 0 in
-     let len = String.length str in
-      try
-         for i = 0 to len - sublen do
-           let j = ref 0 in
-            while String.get str (i + !j) = String.get sub !j do
-               incr j;
-               if !j = sublen then begin found := i; raise Exit; end;
-            done;
-         done;
-         raise Not_found
-      with
-         Exit -> !found
+    else
+      let found = ref 0 in
+      let len = String.length str in
+        try
+          for i = 0 to len - sublen do
+            let j = ref 0 in
+              while String.get str (i + !j) = String.get sub !j do
+                incr j;
+                if !j = sublen then begin found := i; raise Exit; end;
+              done;
+          done;
+          raise Not_found
+        with
+            Exit -> !found
+
+(* thanks to extlib *)
+let buf_len = 8192
+let input_all ic =
+  let rec loop acc total buf ofs =
+    let n = input ic buf ofs (buf_len - ofs) in
+      if n = 0 then
+        let res = String.create total in
+        let pos = total - ofs in
+        let _ = String.blit buf 0 res pos ofs in
+        let coll pos buf =
+          let new_pos = pos - buf_len in
+            String.blit buf 0 res new_pos buf_len;
+            new_pos in
+        let _ = List.fold_left coll pos acc in
+          res
+      else
+        let new_ofs = ofs + n in
+        let new_total = total + n in
+          if new_ofs = buf_len then
+            loop (buf :: acc) new_total (String.create buf_len) 0
+          else loop acc new_total buf new_ofs in
+    loop [] 0 (String.create buf_len) 0
 
 let rec make_array self =
   Value.record (Name.of_string "array") [
@@ -132,11 +156,24 @@ let def = add_binding global_env in
 
 def "throw" (sqfun x -> raise (Value.Error x));
 
-(* todo: support hashing records and tagged records *)
-(*       throw an exception if a tagged record has no generic hash defined *)
 def "hash"
-  (sqfun x ->
-     Value.Int (Hashtbl.hash x));
+  (sqfun
+     | Value.Record (tag, r) as r' ->
+         if tag = Names.record
+         then
+           Value.Int
+             (Hashtbl.hash (NameMap.fold (fun k v a -> (k, v) :: a) r []))
+         else
+           (try
+              Value.Int
+                (Hashtbl.hash (Value.generic (Name.of_string "hash") tag r'))
+            with
+              | Not_found ->
+                  Value.fail
+                    Names.e_type
+                    ("hash is not defined for " ^ (Name.to_string tag)))
+     | _ as x ->
+         Value.Int (Hashtbl.hash x));
 
 def "is"
   (sqfun x ->
@@ -278,7 +315,7 @@ def "fold"
                 (sqfun a ->
                    (let rec loop i xs a =
                       match xs with
-                        | h :: t -> 
+                        | h :: t ->
                             (loop
                                (i + 1) t
                                (f (Value.List
@@ -363,7 +400,7 @@ def "index"
             let i = ref (-1) in
             (try
                let _ =
-                 List.fold_left 
+                 List.fold_left
                    (fun a v ->
                       if x = v
                       then (i := a; raise Exit)
@@ -495,7 +532,7 @@ def "compare"
              NameMap.compare cmp r1 r2
          | (Value.Record (t1, r1), Value.Record (t2, r2)) ->
              (try
-                (let f = Value.generic (Name.of_string "compare") t1 in                
+                (let f = Value.generic (Name.of_string "compare") t1 in
                  let c = f (Value.List [a; b]) in
                  match c with
                    | Value.Symbol n when n = Names.lt -> -1
@@ -510,7 +547,7 @@ def "compare"
              compare a b
      with
        | Invalid_argument "equal: functional value" ->
-           Value.fail 
+           Value.fail
              Names.e_type
              "functions cannot be compared"
    in
@@ -524,7 +561,7 @@ def "compare"
           Value.fail Names.e_type "function requires a list of size 2"
       | _ ->
           Value.fail Names.e_type "argument must be a list"));
- 
+
 def "+" (arith_op ( + ) ( +. ));
 def "-" (arith_op ( - ) ( -. ));
 def "*" (arith_op ( * ) ( *. ));
@@ -634,6 +671,68 @@ def "split"
          Value.fail
            Names.e_type "first argument must be a string or character");
 
+def "slice"
+  (sqfun
+     | Value.List args ->
+         let (start, stop) =
+           match args with
+             | [Value.Int start] -> (start, None)
+             | [Value.Int start; Value.Int stop] -> (start, Some stop)
+             | _ ->
+                 Value.fail
+                   Names.e_type
+                   "function requires a list of size 1-2 integers"
+         in
+           (sqfun
+              | Value.String s ->
+                  let start =
+                    if start >= 0 then start else max 0 (String.length s + start) in
+                  let len =
+                    match stop with
+                      | None -> String.length s - start
+                      | Some stop when stop >= 0 -> stop - start
+                      | Some stop -> String.length s + stop - start
+                  in
+                    (try Value.String (String.sub s start len)
+                     with Invalid_argument "String.sub" -> Value.String "")
+              | Value.List l ->
+                  let list_length = List.length l in
+                  let start =
+                    if start >= 0 then start else list_length + start in
+                  let stop =
+                    match stop with
+                      | None -> list_length
+                      | Some stop when stop >= 0 -> stop
+                      | Some stop -> list_length + stop
+                  in
+                    Value.List
+                      (List.rev
+                         (snd
+                            (List.fold_left
+                               (fun (i, a) v ->
+                                  (i + 1,
+                                   if i >= start && i < stop
+                                   then v :: a
+                                   else a))
+                               (0, []) l)))
+              | _ ->
+                  Value.fail
+                    Names.e_type
+                    "second argument must be a string or list")
+     | _ -> Value.fail Names.e_type "first argument must be a list");
+
+def "lowercase"
+  (sqfun
+     | Value.String s -> Value.String (String.lowercase s)
+     | Value.Char c -> Value.Char (Char.lowercase c)
+     | _ -> Value.fail Names.e_type "argument must be a string or character");
+
+def "uppercase"
+  (sqfun
+     | Value.String s -> Value.String (String.uppercase s)
+     | Value.Char c -> Value.Char (Char.uppercase c)
+     | _ -> Value.fail Names.e_type "argument must be a string or character");
+
 def "starts_with"
   (sqfun
      | Value.String p ->
@@ -712,6 +811,147 @@ def "Array"
             Value.fail Names.e_type "first argument must be an integer")
    ]);
 
+def "File"
+  (let make_out_file out_channel =
+     Value.record (Name.of_string "file") [
+       Name.of_string "close",
+       (sqfun
+          | Value.None ->
+              (try close_out out_channel; Value.None
+               with
+                 | Sys_error e ->
+                     Value.fail (Name.of_string "IOError") e)
+          | _ ->
+              Value.fail Names.e_type "function takes no arguments");
+     ]
+   in
+   let make_in_file in_channel =
+     Value.record (Name.of_string "file") [
+       Name.of_string "read",
+       (sqfun
+          | Value.None ->
+              (try
+                 Value.String (input_all in_channel)
+               with Sys_error e ->
+                 Value.fail (Name.of_string "IOError") e)
+          | _ ->
+              Value.fail Names.e_type "function takes no arguments");
+
+       Name.of_string "read_byte",
+       (sqfun
+          | Value.None ->
+              (try Value.Int (input_byte in_channel)
+               with
+                 | End_of_file ->
+                     Value.fail_value (Name.of_string "EndOfFile") Value.None
+                 | Sys_error e ->
+                     Value.fail (Name.of_string "IOError") e)
+          | _ ->
+              Value.fail Names.e_type "function takes no arguments");
+
+       Name.of_string "read_char",
+       (sqfun
+          | Value.None ->
+              (try Value.Char (input_char in_channel)
+               with
+                 | End_of_file ->
+                     Value.fail_value (Name.of_string "EndOfFile") Value.None
+                 | Sys_error e ->
+                     Value.fail (Name.of_string "IOError") e)
+          | _ ->
+              Value.fail Names.e_type "function takes no arguments");
+
+       Name.of_string "read_line",
+       (sqfun
+          | Value.None ->
+              (try Value.String (input_line in_channel)
+               with
+                 | End_of_file ->
+                     Value.fail_value (Name.of_string "EndOfFile") Value.None
+                 | Sys_error e ->
+                     Value.fail (Name.of_string "IOError") e)
+          | _ ->
+              Value.fail Names.e_type "function takes no arguments");
+
+       Name.of_string "close",
+       (sqfun
+          | Value.None ->
+              (try close_in in_channel; Value.None
+               with
+                 | Sys_error e ->
+                     Value.fail (Name.of_string "IOError") e)
+          | _ ->
+              Value.fail Names.e_type "function takes no arguments");
+     ]
+   in
+     (Value.record Names.module_ [
+        Name.of_string "open_in",
+        (sqfun
+           | Value.String filename ->
+               (try make_in_file (open_in filename)
+                with
+                  | Sys_error e ->
+                      Value.fail (Name.of_string "IOError") e)
+           | _ ->
+               Value.fail Names.e_type "argument must be a string");
+        Name.of_string "open_in_bin",
+        (sqfun
+           | Value.String filename ->
+               (try make_in_file (open_in_bin filename)
+                with
+                  | Sys_error e ->
+                      Value.fail (Name.of_string "IOError") e)
+           | _ ->
+               Value.fail Names.e_type "argument must be a string");
+        Name.of_string "open_out",
+        (sqfun
+           | Value.String filename ->
+               (try make_out_file (open_out filename)
+                with
+                  | Sys_error e ->
+                      Value.fail (Name.of_string "IOError") e)
+           | _ ->
+               Value.fail Names.e_type "argument must be a string");
+        Name.of_string "open_out_bin",
+        (sqfun
+           | Value.String filename ->
+               (try make_out_file (open_out_bin filename)
+                with
+                  | Sys_error e ->
+                      Value.fail (Name.of_string "IOError") e)
+           | _ ->
+               Value.fail Names.e_type "argument must be a string");
+     ]));
+
+def "MD5"
+  (Value.record Names.module_ [
+     Name.of_string "hex",
+     (sqfun
+        | Value.String s -> Value.String (Digest.to_hex (Digest.string s))
+        | _ -> Value.fail Names.e_type "argument must be a string");
+
+     Name.of_string "hex_file",
+     (sqfun
+        | Value.String s ->
+            Value.String
+              (try (Digest.to_hex (Digest.file s))
+               with Sys_error e -> Value.fail (Name.of_string "OSError") e)
+        | _ -> Value.fail Names.e_type "argument must be a string");
+
+     Name.of_string "raw",
+     (sqfun
+        | Value.String s -> Value.String (Digest.string s)
+        | _ -> Value.fail Names.e_type "argument must be a string");
+
+     Name.of_string "raw_file",
+     (sqfun
+        | Value.String s ->
+            Value.String
+              (try (Digest.file s)
+               with Sys_error e -> Value.fail (Name.of_string "OSError") e)
+        | _ -> Value.fail Names.e_type "argument must be a string");
+   ]);
+
 def "Math"
   (Value.record Names.module_ [
      Name.of_string "acos", arith_unary acos;
@@ -751,12 +991,54 @@ def "OS"
                with Sys_error e -> Value.fail (Name.of_string "OSError") e)
           | _ -> Value.fail Names.e_type "argument must be a string");
 
+     Name.of_string "chmod",
+       (sqfun
+          | Value.String path ->
+              (sqfun
+                 | Value.Int mode ->
+                     (try (Unix.chmod path mode; Value.None)
+                      with
+                        | Unix.Unix_error (e, _, n) ->
+                            Value.fail
+                              (Name.of_string "OSError")
+                              ((Unix.error_message e) ^ ": " ^ n))
+                 | _ -> Value.fail Names.e_type "second argument must be an integer")
+          | _ ->
+              Value.fail Names.e_type "first argument must be a string");
+
+     Name.of_string "chroot",
+       (sqfun
+          | Value.String s ->
+              (try (Unix.chroot s; Value.None)
+               with
+                 | Unix.Unix_error (e, _, n) ->
+                     Value.fail
+                       (Name.of_string "OSError")
+                       ((Unix.error_message e) ^ ": " ^ n))
+          | _ -> Value.fail Names.e_type "argument must be a string");
+
      Name.of_string "getcwd",
        (sqfun
           | Value.None ->
               Value.String (Sys.getcwd ())
           | _ ->
               Value.fail Names.e_type "function takes no arguments");
+
+     Name.of_string "link",
+       (sqfun
+          | Value.String s1 ->
+             (sqfun
+                | Value.String s2 ->
+                    (try (Unix.link s1 s2; Value.None)
+                       with
+                         | Unix.Unix_error (e, _, n) ->
+                             Value.fail
+                               (Name.of_string "OSError")
+                               ((Unix.error_message e) ^ ": " ^ n))
+                | _ ->
+                    Value.fail Names.e_type "second argument must be a string")
+          | _ ->
+              Value.fail Names.e_type "first argument must be a string");
 
      Name.of_string "listdir",
        (sqfun
@@ -766,6 +1048,22 @@ def "OS"
                                                  (Sys.readdir s))))
                with Sys_error e -> Value.fail (Name.of_string "OSError") e)
           | _ -> Value.fail Names.e_type "argument must be a string");
+
+     Name.of_string "rename",
+       (sqfun
+          | Value.String s1 ->
+             (sqfun
+                | Value.String s2 ->
+                    (try (Unix.rename s1 s2; Value.None)
+                       with
+                         | Unix.Unix_error (e, _, n) ->
+                             Value.fail
+                               (Name.of_string "OSError")
+                               ((Unix.error_message e) ^ ": " ^ n))
+                | _ ->
+                    Value.fail Names.e_type "second argument must be a string")
+          | _ ->
+              Value.fail Names.e_type "first argument must be a string");
 
      Name.of_string "stat",
        (sqfun
@@ -811,6 +1109,17 @@ def "OS"
               Value.Int (Sys.command cmd)
           | _ ->
               Value.fail Names.e_type "argument must be a string");
+
+     Name.of_string "unlink",
+       (sqfun
+          | Value.String s ->
+              (try (Unix.unlink s; Value.None)
+               with
+                 | Unix.Unix_error (e, _, n) ->
+                     Value.fail
+                       (Name.of_string "OSError")
+                       ((Unix.error_message e) ^ ": " ^ n))
+          | _ -> Value.fail Names.e_type "argument must be a string");
    ]);
 
 def "RE"
@@ -890,8 +1199,17 @@ def "Time"
 let _ =
   try ignore (eval_string global_env "
 
+defun generic sym ->
+  fun x ->
+    let {g: try generics [] sym [typeof x]
+            catch {FieldNotFound} ->
+              throw {ValueError: join \"\" ([symbol_name sym],
+                                            \" is not defined for \",
+                                            [symbol_name [typeof x]])}}
+    g x;
+
 defun  = a -> fun b -> is .= [compare (a, b)];
-defun != a -> fun b -> not [is .= [compare (a, b)]];
+defun <> a -> fun b -> not [is .= [compare (a, b)]];
 defun <  a -> fun b -> is .< [compare (a, b)];
 defun >  a -> fun b -> is .> [compare (a, b)];
 defun <= a -> fun b -> not [is .> [compare (a, b)]];
@@ -912,28 +1230,12 @@ defun compose fs ->
   }
   loop (head fs, tail fs);
 
-defun copy xs ->
-  try generics [] .copy [typeof xs] xs
-  catch {FieldNotFound} ->
-    throw {ValueError: join \"\" (\"copy is not defined for \",
-                                  [symbol_name [typeof xs]])};
+def copy generic .copy;
 
 defun default d -> fun v -> fun x ->
   try v x
   catch {IndexNotFound} -> d
   catch {FieldNotFound} -> d;
-
-defun drop n ->
-  fun xs ->
-    letrec {
-      loop: fun (n', xs) ->
-        if xs
-        then [if < n' n
-              then loop (+ n' 1, tail xs)
-              else xs]
-        else ()
-    }
-    loop (0, xs);
 
 defun each xs -> fun f ->
   fold xs [fun (_, v, _) -> [f v; []]] [];
@@ -948,6 +1250,33 @@ defun filteri xs -> fun f ->
   reverse [fold xs [fun (i, v, a) -> if f (i, v) then cons (i, v) a else a] ()];
 
 defun flip f -> fun x -> fun y -> f y x;
+
+def hex
+  let {
+    int_0:  int '0',
+    int_9:  int '9',
+    lookup: {a: 10, b: 11, c: 12, d: 13, e: 14, f: 15},
+  }
+  let {
+    hex_to_dec: fun h ->
+      let {int_h: int h}
+      if and (>= int_h int_0, <= int_h int_9)
+      then int [string h]
+      else [
+        try lookup [symbol [string [lowercase h]]]
+        catch {FieldNotFound} -> throw {ValueError: h}
+      ]
+  }
+  fun str ->
+    letrec {
+      loop: fun (idx, acc) ->
+        if >= idx 0
+        then [+ [hex_to_dec [str idx]] [* 16 [loop (- idx 1, acc)]]]
+        else acc
+    }
+    loop (- [size str] 1, 0);
+
+defun id x -> x;
 
 defun indexes xs -> mapi xs [fun (i, _) -> i];
 def fields indexes;
@@ -982,6 +1311,13 @@ defun module r -> tag .module r;
 
 defun neg x -> - 0 x;
 
+defun octal num ->
+  letrec {
+    loop: fun (rem, acc) ->
+      if = rem 0 then acc else [+ [% rem 10] [* 8 [loop (/ rem 10, acc)]]]
+  }
+  loop (num, 0);
+
 defun pairs x -> mapi x [fun p -> p];
 
 defun println x -> [print x; print \"\n\"];
@@ -1003,15 +1339,13 @@ defun range args ->
   }
   let {
     _: if = step 0 then throw {ValueError: \"step must not be zero\"},
-    in_range: if < step 0 then > else <
+    in_range: if < step 0 then > else <,
+    current: start,
   }
-  letrec {
-    loop: fun (x, xs) ->
-      if in_range x stop
-      then loop (+ x step, cons x xs)
-      else xs
-  }
-  reverse [loop (start, ())];
+  stream fun [] ->
+    if in_range current stop
+    then let {result: current} [set current [+ current step]; result]
+    else throw {EndOfStream: []};
 
 defun ref value ->
   tag .ref {value: fun [] -> value,
@@ -1020,27 +1354,78 @@ defun ref value ->
 defun replace from -> fun to -> fun s ->
   join [string to] [split [RE.quote from] s];
 
-defun reverse xs ->
-  try generics [] .reverse [typeof xs] xs
-  catch {FieldNotFound} ->
-    throw {ValueError: join \"\" (\"reverse is not defined for \",
-                                  [symbol_name [typeof xs]])};
+def reverse generic .reverse;
 
 def sort sort_with compare;
 
-defun take n ->
-  fun xs ->
-    letrec {
-      loop: fun (n', xs, res) ->
-        if xs
-        then [if < n' n
-              then loop (+ n' 1, tail xs, cons [head xs] res)
-              else res]
-        else res
-    }
-    reverse [loop (0, xs, ())];
+defun stream seq_or_func ->
+  if is .stream [typeof seq_or_func]
+  then seq_or_func
+  else [
+    tag .stream
+    if is .function [typeof seq_or_func]
+    then {next: seq_or_func}
+    else [
+      let {buffer: values seq_or_func}
+      {next: fun [] ->
+         if buffer
+         then let {result: head buffer} [!tail buffer; result]
+         else throw {EndOfStream: []}}
+    ]
+  ];
 
-defun values xs -> map xs [fun v -> v];
+defun take n -> fun stream ->
+  if > n 0
+  then append (take [- n 1] stream,
+               try (stream.next []) catch {EndOfStream} -> ())
+  else ();
+
+defun drop n -> fun stream ->
+  do [
+    if > n 0 then [
+      try stream.next [] catch {EndOfStream} -> [];
+      drop [- n 1] stream;
+    ];
+    stream
+  ];
+
+defun count_from n ->
+  stream fun [] ->
+    let {result: n}
+    do [
+      set n [+ n 1];
+      result
+    ];
+
+defun chain streams ->
+  let {streams: stream streams}
+  let {current: stream [streams.next []]}
+  letrec {
+    find_next: fun [] ->
+      try current.next []
+      catch {EndOfStream} -> [
+        set current stream [streams.next []];
+        find_next []
+      ]
+  }
+  stream find_next;
+
+defun map_stream s -> fun f ->
+  stream fun [] ->
+    f [s.next []];
+
+defun filter_stream s -> fun f ->
+  letrec {
+    find_next: fun [] ->
+      let {result: s.next []}
+      if f result then result else find_next []
+  }
+  stream find_next;
+
+defun values xs ->
+  if is .list [typeof xs]
+  then xs
+  else map xs id;
 
 !update Array {
   get: fun a -> a.get,
@@ -1062,6 +1447,22 @@ defun values xs -> map xs [fun v -> v];
       eachi list fun (i, v) -> result.put i v;
       result
     ],
+};
+
+!update File {
+  bytes: fun file ->
+    stream fun [] ->
+      try file.read_byte [] catch {EndOfFile} -> throw {EndOfStream: []},
+
+  chars: fun file ->
+    stream fun [] ->
+      try file.read_char [] catch {EndOfFile} -> throw {EndOfStream: []},
+
+  lines: fun file ->
+    stream fun [] ->
+      try file.read_line [] catch {EndOfFile} -> throw {EndOfStream: []},
+
+  close: fun {close} -> close [],
 };
 
 def Hash module {
@@ -1097,9 +1498,9 @@ def Hash module {
     letrec {
       odata: @data,
       osize: globals[].size odata,
-      nsize: min ( * 2 [+ 1 osize], 4194303 ),
+      nsize: min (+ 1 [* 2 osize], 4194303),
     }
-    if != nsize osize then
+    if <> nsize osize then
       let {ndata: Array.make nsize .empty}
       letrec {
         insert_bucket: fun x ->
@@ -1166,7 +1567,7 @@ def Hash module {
     let {i: % [hash key] [globals[].size [@data]]}
     Array.put [@data] i [remove_bucket [@data i]],
 
-  fold: fun (h, f, init) -> 
+  fold: fun (h, f, init) ->
     letrec {
       do_bucket: fun b -> fun accu ->
         if is .empty b
@@ -1205,6 +1606,18 @@ def_generic .copy .hash [Hash.copy];
 def_generic .fold .array [Array.fold];
 def_generic .fold .hash [Hash.fold];
 
+def_generic .fold .stream fun (stream, func, init) ->
+  letrec {
+    loop: fun (i, acc) ->
+      let {next: [], done: .false}
+      do [
+        try set next stream.next []
+        catch {EndOfStream} -> set done .true;
+        if done then acc else loop (+ i 1, func (i, next, acc));
+      ]
+  }
+  loop (0, init);
+
 def_generic .reverse .string fun s ->
   join \"\" [fold s [fun (_, v, a) -> cons v a] ()];
 def_generic .reverse .list fun l ->
@@ -1227,7 +1640,7 @@ def_generic .to_string .ref fun ref ->
   fold [OS.environ]
        [fun (_, v, a) ->
           let {vals: split '=' v}
-          add a [symbol [head vals]] [join \"\" [tail vals]]]
+          add a [symbol [head vals]] [join '=' [tail vals]]]
        {}
 ];
 
