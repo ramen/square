@@ -52,28 +52,50 @@ let rec eval env = function
                     (try Value.Char s.[i]
                      with Invalid_argument "index out of bounds" ->
                        Value.fail_value Names.e_index_nf (Value.Int i))
-                | _ -> Value.fail Names.e_type "can't apply non-integer to string")
+                | _ ->
+                    Value.fail
+                      Names.e_type
+                      "can't apply non-integer to string")
          | Value.List l ->
              (match (eval env a) with
                 | Value.Int i -> (try List.nth l i
                                   with Failure "nth" ->
                                     Value.fail_value
                                       Names.e_index_nf (Value.Int i))
-                | _ -> Value.fail Names.e_type "can't apply non-integer to list")
+                | _ ->
+                    Value.fail Names.e_type "can't apply non-integer to list")
          | Value.Record (tag, r) as r' ->
              (match (eval env a) with
-                | Value.Symbol n -> (try NameMap.find n r
-                                     with Not_found ->
-                                       Value.fail_value
-                                         Names.e_field_nf (Value.Symbol n))
-                | _ as arg -> 
+                | Value.Symbol n as arg ->
+                    (try NameMap.find n r
+                     with Not_found ->
+                       (try
+                          (match Value.generic (Name.of_string "call") tag r'
+                           with
+                             | Value.Function f -> f arg
+                             | _ ->
+                                 Value.fail
+                                   Names.e_type
+                                   "non-function in generics table")
+                        with Not_found ->
+                          Value.fail_value
+                            Names.e_field_nf (Value.Symbol n)))
+                | _ as arg ->
                     (try
                        (match Value.generic (Name.of_string "call") tag r' with
                           | Value.Function f -> f arg
-                          | _ -> Value.fail Names.e_type "non-function in generics table")
+                          | _ ->
+                              Value.fail
+                                Names.e_type
+                                "non-function in generics table")
                      with Not_found ->
-                       Value.fail Names.e_type ("call is not defined for " ^ (Name.to_string tag))))
-         | _ as v -> Value.fail Names.e_type ("call of non-function: " ^ (Value.to_string v)))
+                       Value.fail
+                         Names.e_type
+                         ("call is not defined for " ^ (Name.to_string tag))))
+         | _ as v ->
+             Value.fail
+               Names.e_type
+               ("call is not defined for " ^ (Value.to_string v)))
   | AST.Fun (AST.EmptyPat, ast) ->
       Value.Function
         (function
