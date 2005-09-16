@@ -1,3 +1,5 @@
+(*pp camlp4o -I . pa_sqfun.cmo *)
+
 open Name
 open Names
 open Value

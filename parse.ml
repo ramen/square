@@ -1,3 +1,5 @@
+(*pp camlp4o *)
+
 open Ast
 open Name
 open Names

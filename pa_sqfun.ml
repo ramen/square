@@ -1,3 +1,5 @@
+(*pp camlp4o pa_extend.cmo q_MLast.cmo -loc loc *)
+
 let match_case = Grammar.Entry.create Pcaml.gram "match_case";;
 
 EXTEND
