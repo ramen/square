@@ -1,17 +1,15 @@
+(*pp camlp4o *)
+
 (* main.ml - square language main script *)
 
 (* todo:
      - change comment characters (lexer)
-     - allow ? and ! in names (lexer)
      - raw strings? (lexer)
      - try/catch DONE! finally?
-     - slice
      - polymorphic add/remove (in progress)
      - "in" for strings and lists (index-based)
      - better parser error reporting
-     - Graphics
-     - tutorial
-     - sourceforge
+     - Graphics (halfway implemented)
 *)
 
 open Ast
@@ -23,7 +21,7 @@ open Prelude
 open Parse
 open Printf
 
-let version = "0.2.0"
+let version = "0.2.1"
 let prompt = ":: "
 let dump_ast = false
 
@@ -57,7 +55,8 @@ let load_file filename =
   let in_channel =
     if filename = "-"
     then stdin
-    else open_in filename in
+    else (try open_in filename
+          with Sys_error e -> Value.fail (Name.of_string "IOError") e) in
   let line_num = ref 1 in
   let in_stream = Stream.of_channel in_channel in
   let drop_shebang = parser
@@ -84,18 +83,36 @@ let load_file filename =
              ignore (eval global_env ast)
            with
              | Value.Error e ->
-                 Value.fail Names.e_eval (sprintf "Error in line %d of %s: %s" !line_num filename (Value.to_string e)));
+                 Value.fail
+                   Names.e_eval
+                   (sprintf "Error in line %d of %s: %s"
+                      !line_num filename (Value.to_string e)));
           astloop stream
       | [< >] -> () in
     try
       astloop (parse_stream (lexer (count_lines (drop_shebang in_stream))))
     with
-      | Stream.Error "" -> Value.fail Names.e_eval (sprintf "Syntax error in line %d of %s" !line_num filename); toploop ()
-      | Stream.Error e -> Value.fail Names.e_eval (sprintf "Syntax error in line %d of %s: %s" !line_num filename e); toploop ()
-      | Stream.Failure -> Value.fail Names.e_eval (sprintf "Syntax error in line %d of %s" !line_num filename); toploop ()
+      | Stream.Error "" ->
+          Value.fail
+            Names.e_eval
+            (sprintf "Syntax error in line %d of %s" !line_num filename);
+          toploop ()
+      | Stream.Error e ->
+          Value.fail
+            Names.e_eval
+            (sprintf "Syntax error in line %d of %s: %s" !line_num filename e);
+          toploop ()
+      | Stream.Failure ->
+          Value.fail
+            Names.e_eval
+            (sprintf "Syntax error in line %d of %s" !line_num filename);
+          toploop ()
       | Value.Error e as e' -> raise e'
       | _ as e ->
-          Value.fail Names.e_eval (sprintf "Uncaught exception in line %d of %s: %s" !line_num filename (Printexc.to_string e));
+          Value.fail
+            Names.e_eval
+            (sprintf "Uncaught exception in line %d of %s: %s"
+               !line_num filename (Printexc.to_string e));
           toploop ()
 
 let def = add_binding global_env in
