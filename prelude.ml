@@ -1,3 +1,5 @@
+(*pp camlp4o -I . pa_sqfun.cmo *)
+
 open Name
 open Names
 open Value
@@ -1219,6 +1221,20 @@ defun @ x -> x.value[];
 defun @= x -> fun y -> x.set_value y;
 
 defun abs x -> if or (< x 0, = x -0.0) then neg x else x;
+
+defun assoc key -> fun alist ->
+  letrec {
+    loop:  fun list -> if list then match [head list] [tail list] else [],
+    match: fun (k, v) -> fun rest -> if = key k then v else loop rest,
+  }
+  loop alist;
+
+defun assq key -> fun alist ->
+  letrec {
+    loop:  fun list -> if list then match [head list] [tail list] else [],
+    match: fun (k, v) -> fun rest -> if is key k then v else loop rest,
+  }
+  loop alist;
 
 defun compose fs ->
   letrec {
