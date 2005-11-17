@@ -1201,7 +1201,7 @@ def "Time"
 let _ =
   try ignore (eval_string global_env "
 
-defun generic sym ->
+def generic fun sym ->
   fun x ->
     let {g: try generics [] sym [typeof x]
             catch {FieldNotFound} ->
@@ -1210,33 +1210,33 @@ defun generic sym ->
                                             [symbol_name [typeof x]])}}
     g x;
 
-defun  = a -> fun b -> is .= [compare (a, b)];
-defun <> a -> fun b -> not [is .= [compare (a, b)]];
-defun <  a -> fun b -> is .< [compare (a, b)];
-defun >  a -> fun b -> is .> [compare (a, b)];
-defun <= a -> fun b -> not [is .> [compare (a, b)]];
-defun >= a -> fun b -> not [is .< [compare (a, b)]];
+def  = fun a -> fun b -> is .= [compare (a, b)];
+def <> fun a -> fun b -> not [is .= [compare (a, b)]];
+def <  fun a -> fun b -> is .< [compare (a, b)];
+def >  fun a -> fun b -> is .> [compare (a, b)];
+def <= fun a -> fun b -> not [is .> [compare (a, b)]];
+def >= fun a -> fun b -> not [is .< [compare (a, b)]];
 
-defun @ x -> x.value[];
-defun @= x -> fun y -> x.set_value y;
+def @ fun x -> x.value[];
+def @= fun x -> fun y -> x.set_value y;
 
-defun abs x -> if or (< x 0, = x -0.0) then neg x else x;
+def abs fun x -> if or (< x 0, = x -0.0) then neg x else x;
 
-defun assoc key -> fun alist ->
+def assoc fun key -> fun alist ->
   letrec {
     loop:  fun list -> if list then match [head list] [tail list] else [],
     match: fun (k, v) -> fun rest -> if = key k then v else loop rest,
   }
   loop alist;
 
-defun assq key -> fun alist ->
+def assq fun key -> fun alist ->
   letrec {
     loop:  fun list -> if list then match [head list] [tail list] else [],
     match: fun (k, v) -> fun rest -> if is key k then v else loop rest,
   }
   loop alist;
 
-defun compose fs ->
+def compose fun fs ->
   letrec {
     loop: fun (f, fs) ->
       if fs
@@ -1248,24 +1248,26 @@ defun compose fs ->
 
 def copy generic .copy;
 
-defun default d -> fun v -> fun x ->
+def default fun d -> fun v -> fun x ->
   try v x
   catch {IndexNotFound} -> d
   catch {FieldNotFound} -> d;
 
-defun each xs -> fun f ->
+def each fun xs -> fun f ->
   fold xs [fun (_, v, _) -> [f v; []]] [];
 
-defun eachi xs -> fun f ->
+def eachi fun xs -> fun f ->
   fold xs [fun (i, v, _) -> [f (i, v); []]] [];
 
-defun filter xs -> fun f ->
+def empty fun xs -> = 0 [size xs];
+
+def filter fun xs -> fun f ->
   reverse [fold xs [fun (_, v, a) -> if f v then cons v a else a] ()];
 
-defun filteri xs -> fun f ->
+def filteri fun xs -> fun f ->
   reverse [fold xs [fun (i, v, a) -> if f (i, v) then cons (i, v) a else a] ()];
 
-defun flip f -> fun x -> fun y -> f y x;
+def flip fun f -> fun x -> fun y -> f y x;
 
 def hex
   let {
@@ -1292,17 +1294,17 @@ def hex
     }
     loop (- [size str] 1, 0);
 
-defun id x -> x;
+def id fun x -> x;
 
-defun indexes xs -> mapi xs [fun (i, _) -> i];
+def indexes fun xs -> mapi xs [fun (i, _) -> i];
 def fields indexes;
 
-defun isa type -> fun value -> is type [typeof value];
+def isa fun type -> fun value -> is type [typeof value];
 
-defun map xs -> fun f ->
+def map fun xs -> fun f ->
   reverse [fold xs [fun (_, v, a) -> cons [f v] a] ()];
 
-defun mapi xs -> fun f ->
+def mapi fun xs -> fun f ->
   reverse [fold xs [fun (i, v, a) -> cons [f (i, v)] a] ()];
 
 def min [];
@@ -1319,26 +1321,26 @@ let {
     loop (head xs, xs)
 }
 do [
-  set min optimum <;
-  set max optimum >;
+  := min optimum <;
+  := max optimum >;
 ];
 
-defun module r -> tag .module r;
+def module fun r -> tag .module r;
 
-defun neg x -> - 0 x;
+def neg fun x -> - 0 x;
 
-defun octal num ->
+def octal fun num ->
   letrec {
     loop: fun (rem, acc) ->
       if = rem 0 then acc else [+ [% rem 10] [* 8 [loop (/ rem 10, acc)]]]
   }
   loop (num, 0);
 
-defun pairs x -> mapi x [fun p -> p];
+def pairs fun x -> mapi x [fun p -> p];
 
-defun println x -> [print x; print \"\n\"];
+def println fun x -> [print x; print \"\n\"];
 
-defun range args ->
+def range fun args ->
   let {
     _: if not [isa .record args]
        then throw {TypeError: \"function requires a record argument\"},
@@ -1360,21 +1362,28 @@ defun range args ->
   }
   stream fun [] ->
     if in_range current stop
-    then let {result: current} [set current [+ current step]; result]
+    then let {result: current} [:= current [+ current step]; result]
     else throw {EndOfStream: []};
 
-defun ref value ->
+def ref fun value ->
   tag .ref {value: fun [] -> value,
-            set_value: fun x -> set value x};
+            set_value: fun x -> := value x};
 
-defun replace from -> fun to -> fun s ->
+def replace fun from -> fun to -> fun s ->
   join [string to] [split [RE.quote from] s];
 
 def reverse generic .reverse;
 
+def signal fun slots ->
+  let {slots: if slots then slots else ()}
+  tag .signal {
+    connect: fun slot -> := slots [cons slot slots],
+    emit: fun msg -> each slots fun slot -> slot msg,
+  };
+
 def sort sort_with compare;
 
-defun stream seq_or_func ->
+def stream fun seq_or_func ->
   if is .stream [typeof seq_or_func]
   then seq_or_func
   else [
@@ -1390,13 +1399,15 @@ defun stream seq_or_func ->
     ]
   ];
 
-defun take n -> fun stream ->
+def take fun n -> fun stream ->
   if > n 0
   then append (take [- n 1] stream,
                try (stream.next []) catch {EndOfStream} -> ())
   else ();
 
-defun drop n -> fun stream ->
+(* todo: take_stream *)
+
+def drop fun n -> fun stream ->
   do [
     if > n 0 then [
       try stream.next [] catch {EndOfStream} -> [];
@@ -1405,32 +1416,32 @@ defun drop n -> fun stream ->
     stream
   ];
 
-defun count_from n ->
+def count_from fun n ->
   stream fun [] ->
     let {result: n}
     do [
-      set n [+ n 1];
+      := n [+ n 1];
       result
     ];
 
-defun chain streams ->
+def chain fun streams ->
   let {streams: stream streams}
   let {current: stream [streams.next []]}
   letrec {
     find_next: fun [] ->
       try current.next []
       catch {EndOfStream} -> [
-        set current stream [streams.next []];
+        := current stream [streams.next []];
         find_next []
       ]
   }
   stream find_next;
 
-defun map_stream s -> fun f ->
+def map_stream fun s -> fun f ->
   stream fun [] ->
     f [s.next []];
 
-defun filter_stream s -> fun f ->
+def filter_stream fun s -> fun f ->
   letrec {
     find_next: fun [] ->
       let {result: s.next []}
@@ -1438,7 +1449,7 @@ defun filter_stream s -> fun f ->
   }
   stream find_next;
 
-defun values xs ->
+def values fun xs ->
   if is .list [typeof xs]
   then xs
   else map xs id;
@@ -1612,6 +1623,7 @@ def Hash module {
 
 def_generic .call .array [Array.get];
 def_generic .call .hash [Hash.get];
+def_generic .call .signal fun signal -> signal.emit;
 
 def_generic .compare .array fun (a, b) -> compare (values a, values b);
 def_generic .compare .ref fun (a, b) -> compare (a.value [], b.value []);
@@ -1627,8 +1639,8 @@ def_generic .fold .stream fun (stream, func, init) ->
     loop: fun (i, acc) ->
       let {next: [], done: .false}
       do [
-        try set next stream.next []
-        catch {EndOfStream} -> set done .true;
+        try := next stream.next []
+        catch {EndOfStream} -> := done .true;
         if done then acc else loop (+ i 1, func (i, next, acc));
       ]
   }

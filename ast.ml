@@ -83,7 +83,60 @@ module AST = struct
     | PatCatch (p, a) ->
         sprintf "PatCatch (%s, %s)" (pattern_to_string p) (to_string a)
 
-  let record items = 
+  let rec to_xml = function
+    | Name n -> sprintf "<Name>%s</Name>" (Name.to_string n)
+    | Symbol n -> sprintf "<Symbol>%s</Symbol>" (Name.to_string n)
+    | String s -> sprintf "<String>%s</String>" s
+    | Int i -> sprintf "<Int>%d</Int>" i
+    | Float f -> sprintf "<Float>%f</Float>" f
+    | Char c -> sprintf "<Char>%c</Char>" c
+    | List l ->
+        sprintf "<List>%s</List>" (String.concat " " (List.map to_xml l))
+    | Record r ->
+        sprintf "<Record>%s</Record>"
+          (String.concat " "
+             (NameMap.fold
+                (fun k v a ->
+                   (sprintf "%s %s"
+                      (Name.to_string k)
+                      (to_xml v)) :: a) r []))
+    | Do l -> sprintf "<Do>%s</Do>" (String.concat " " (List.map to_xml l))
+    | Def (n, a) -> sprintf "<Def>%s %s</Def>" (Name.to_string n) (to_xml a)
+    | Set (n, a) -> sprintf "<Set>%s %s</Set>" (Name.to_string n) (to_xml a)
+    | Undef n -> sprintf "<Undef>%s</Undef>" (Name.to_string n)
+    | Let (xs, a) ->
+        sprintf "<Let>%s %s</Let>"
+          (String.concat " "
+             (List.map
+                (fun (n, a) ->
+                   sprintf "%s %s" (Name.to_string n) (to_xml a)) xs))
+          (to_xml a)
+    | If l -> sprintf "<If>%s</If>" (String.concat " " (List.map to_xml l))
+    | Fun (p, a) -> sprintf "<Fun>%s %s</Fun>" (pattern_to_xml p) (to_xml a)
+    | App (f, a) -> sprintf "<App>%s %s</App>" (to_xml f) (to_xml a)
+    | Try (a, l) ->
+        sprintf "<Try>%s %s</Try>"
+          (to_xml a) (String.concat " " (List.map catch_to_xml l))
+
+  and pattern_to_xml = function
+    | EmptyPat -> "<EmptyPat />"
+    | ScalarPat n -> sprintf "<ScalarPat>%s</ScalarPat>" (Name.to_string n)
+    | ListPat l ->
+        sprintf "<ListPat>%s</ListPat>"
+          (String.concat " "
+             (List.map (fun n -> sprintf "%s" (Name.to_string n)) l))
+    | RecordPat r ->
+        sprintf "<RecordPat>%s</RecordPat>"
+          (String.concat " "
+             (List.map (fun n -> sprintf "%s" (Name.to_string n)) r))
+
+  and catch_to_xml = function
+    | ValCatch (n, a) ->
+        sprintf "<ValCatch>%s %s</ValCatch>" (Name.to_string n) (to_xml a)
+    | PatCatch (p, a) ->
+        sprintf "<PatCatch>%s %s</PatCatch>" (pattern_to_xml p) (to_xml a)
+
+  let record items =
     Record (List.fold_left
               (fun a (k, v) -> NameMap.add k v a)
               NameMap.empty items)

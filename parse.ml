@@ -5,9 +5,9 @@ open Name
 open Names
 
 let keywords = ["["; "]"; "{"; "}"; "("; ")"; "."; ","; ":"; ";"; "!";
-                "do"; "def"; "set"; "undef"; "let"; "letrec";
+                "do"; "def"; ":="; "undef"; "let"; "letrec";
                 "if"; "then"; "elif"; "else"; "and"; "or";
-                "fun"; "defun"; "try"; "catch"; "->"]
+                "fun"; "try"; "catch"; "->"]
 
 let lexer = Genlex.make_lexer keywords
 
@@ -44,9 +44,9 @@ and parse_expr = parser
        'Genlex.Ident name ?? "name expected after 'def'";
        expr = parse ?? "missing expression after 'def'" >]
     -> AST.Def ((Name.of_string name), expr)
-  | [< 'Genlex.Kwd "set";
-       'Genlex.Ident name ?? "name expected after 'set'";
-       expr = parse ?? "missing expression after 'set'" >]
+  | [< 'Genlex.Kwd ":=";
+       'Genlex.Ident name ?? "name expected after ':='";
+       expr = parse ?? "missing expression after ':='" >]
     -> AST.Set ((Name.of_string name), expr)
   | [< 'Genlex.Kwd "!";
        func = parse_mutator;
@@ -91,12 +91,6 @@ and parse_expr = parser
        'Genlex.Kwd "->" ?? "'->' expected after 'fun'";
        expr = parse ?? "missing expression after 'fun'" >]
     -> AST.Fun (pat, expr)
-  | [< 'Genlex.Kwd "defun";
-       'Genlex.Ident name ?? "name expected after 'defun'";
-       pat = parse_pattern ?? "pattern expected after 'defun'";
-       'Genlex.Kwd "->" ?? "'->' expected after 'defun'";
-       expr = parse ?? "missing expression after 'defun'" >]
-    -> AST.Def ((Name.of_string name), AST.Fun (pat, expr))
   | [< 'Genlex.Kwd "try";
        expr = parse ?? "missing expression after 'try'";
        'Genlex.Kwd "catch" ?? "'try' requires at least one 'catch'";

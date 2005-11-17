@@ -21,15 +21,17 @@ open Prelude
 open Parse
 open Printf
 
-let version = "0.2.1"
+let version = "0.2.3"
 let prompt = ":: "
 let dump_ast = false
+let dump_xml = false
 
 let rec toploop () =
   let rec astloop stream =
     match stream with parser
       | [< 'ast >] ->
           if dump_ast then print_endline (AST.to_string ast);
+          if dump_xml then print_endline (AST.to_xml ast);
           (try
              print_endline (Value.to_string (eval global_env ast))
            with
