@@ -32,3 +32,5 @@ Here is a simple example to demonstrate Square's syntax. It prints "3",
         aux start;
 
     countdown 3;
+
+More Square code examples can be found in [the source](https://github.com/ramen/square/blob/master/prelude.ml#L1204).
