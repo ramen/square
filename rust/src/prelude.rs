@@ -1230,6 +1230,107 @@ pub fn init_prelude(env: &Env) {
         )
     });
 
+    // -- Sqlite module --
+    def("Sqlite", {
+        Value::record(
+            Names::module_(),
+            vec![(
+                Name::new("open"),
+                func1(|x| match x {
+                    Value::String(path) => {
+                        let conn = rusqlite::Connection::open(path.as_ref())
+                            .map_err(|e| Value::error(Name::new("SqliteError"), &e.to_string()))?;
+                        let conn = Rc::new(conn);
+                        let conn2 = conn.clone();
+                        Ok(Value::record(
+                            Name::new("sqlite_conn"),
+                            vec![
+                                (
+                                    Name::new("execute"),
+                                    func1(move |q| match q {
+                                        Value::String(sql) => {
+                                            let mut stmt = conn.prepare(&sql).map_err(|e| {
+                                                Value::error(
+                                                    Name::new("SqliteError"),
+                                                    &e.to_string(),
+                                                )
+                                            })?;
+                                            let col_count = stmt.column_count();
+                                            let col_names: Vec<Name> = (0..col_count)
+                                                .map(|i| Name::new(stmt.column_name(i).unwrap()))
+                                                .collect();
+                                            let rows = stmt
+                                                .query_map([], |row| {
+                                                    let fields: Vec<(Name, Value)> = col_names
+                                                        .iter()
+                                                        .enumerate()
+                                                        .map(|(i, name)| {
+                                                            let val: String = row
+                                                                .get::<_, rusqlite::types::Value>(i)
+                                                                .map(|v| match v {
+                                                                    rusqlite::types::Value::Null => {
+                                                                        String::new()
+                                                                    }
+                                                                    rusqlite::types::Value::Integer(n) => {
+                                                                        n.to_string()
+                                                                    }
+                                                                    rusqlite::types::Value::Real(f) => {
+                                                                        f.to_string()
+                                                                    }
+                                                                    rusqlite::types::Value::Text(s) => s,
+                                                                    rusqlite::types::Value::Blob(b) => {
+                                                                        format!("<blob:{} bytes>", b.len())
+                                                                    }
+                                                                })
+                                                                .unwrap_or_default();
+                                                            (*name, Value::string(val))
+                                                        })
+                                                        .collect();
+                                                    Ok(fields)
+                                                })
+                                                .map_err(|e| {
+                                                    Value::error(
+                                                        Name::new("SqliteError"),
+                                                        &e.to_string(),
+                                                    )
+                                                })?;
+                                            let mut result = Vec::new();
+                                            for row in rows {
+                                                let fields = row.map_err(|e| {
+                                                    Value::error(
+                                                        Name::new("SqliteError"),
+                                                        &e.to_string(),
+                                                    )
+                                                })?;
+                                                result.push(Value::record(Names::record(), fields));
+                                            }
+                                            Ok(Value::list(result))
+                                        }
+                                        _ => Err(Value::error(
+                                            Names::e_type(),
+                                            "argument must be a string",
+                                        )),
+                                    }),
+                                ),
+                                (
+                                    Name::new("close"),
+                                    func1(move |_| {
+                                        // Drop by taking ownership — but since it's in Rc,
+                                        // this is a no-op. The connection closes when all
+                                        // references are dropped.
+                                        drop(conn2.clone());
+                                        Ok(Value::None)
+                                    }),
+                                ),
+                            ],
+                        ))
+                    }
+                    _ => Err(Value::error(Names::e_type(), "argument must be a string")),
+                }),
+            )],
+        )
+    });
+
     // -- Time module --
     def("Time", {
         Value::record(

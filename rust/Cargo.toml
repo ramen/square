@@ -7,3 +7,4 @@ description = "Square programming language - ported from OCaml"
 [dependencies]
 rustyline = "15"
 regex = "1"
+rusqlite = { version = "0.31", features = ["bundled"] }

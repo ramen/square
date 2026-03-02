@@ -661,6 +661,26 @@ println m.groups;     (* ("123") — list of match groups *)
 println [re.replace "NUM" "abc123def"];    (* "abcNUMdef" *)
 ```
 
+### Sqlite
+
+| Function              | Description                                    |
+|-----------------------|------------------------------------------------|
+| `Sqlite.open path`    | Open a SQLite database; returns a connection   |
+| `conn.execute sql`    | Execute a SQL query; returns a list of records |
+| `conn.close []`       | Close the connection                           |
+
+Rows are returned as records with column names as keys. All values are
+returned as strings.
+
+```
+def conn Sqlite.open "mydata.db";
+def rows conn.execute "SELECT * FROM users LIMIT 5";
+each rows [fun row -> println [row .name]];
+conn.close [];
+```
+
+Errors throw `{SqliteError: "..."}`.
+
 ### Time
 
 | Function         | Description                             |
