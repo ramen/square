@@ -23,6 +23,7 @@ use value::{init_generics, SquareError, Value};
 
 const VERSION: &str = "0.2.3";
 const PROMPT: &str = ":: ";
+const CONTINUATION_PROMPT: &str = ".. ";
 
 struct SquareHelper;
 
@@ -32,7 +33,12 @@ impl Highlighter for SquareHelper {
         prompt: &'p str,
         _default: bool,
     ) -> Cow<'b, str> {
-        Cow::Owned(format!("\x1b[1;36m{}\x1b[0m", prompt))
+        if prompt == PROMPT {
+            Cow::Owned(format!("\x1b[1;36m{}\x1b[0m", prompt))
+        } else {
+            // Continuation prompt
+            Cow::Owned(format!("\x1b[36m{}\x1b[0m", prompt))
+        }
     }
 }
 
@@ -45,6 +51,106 @@ impl rustyline::hint::Hinter for SquareHelper {
 }
 
 impl rustyline::validate::Validator for SquareHelper {}
+
+/// Check if the input looks incomplete (unclosed delimiters or trailing arrow).
+fn is_incomplete(input: &str) -> bool {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    // Count unmatched delimiters, respecting strings and comments
+    let mut parens = 0i32;
+    let mut brackets = 0i32;
+    let mut braces = 0i32;
+    let chars: Vec<char> = input.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
+
+    while i < len {
+        match chars[i] {
+            '"' => {
+                // Skip string literal
+                i += 1;
+                while i < len {
+                    if chars[i] == '\\' {
+                        i += 2;
+                        continue;
+                    }
+                    if chars[i] == '"' {
+                        i += 1;
+                        break;
+                    }
+                    i += 1;
+                }
+                continue;
+            }
+            '\'' => {
+                // Skip char literal: 'x' or '\n'
+                i += 1;
+                if i < len && chars[i] == '\\' {
+                    i += 2;
+                } else if i < len {
+                    i += 1;
+                }
+                if i < len && chars[i] == '\'' {
+                    i += 1;
+                }
+                continue;
+            }
+            '(' if i + 1 < len && chars[i + 1] == '*' => {
+                // Skip block comment
+                i += 2;
+                let mut depth = 1;
+                while i < len && depth > 0 {
+                    if i + 1 < len && chars[i] == '(' && chars[i + 1] == '*' {
+                        depth += 1;
+                        i += 2;
+                    } else if i + 1 < len && chars[i] == '*' && chars[i + 1] == ')' {
+                        depth -= 1;
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+                if depth > 0 {
+                    return true; // Unclosed comment
+                }
+                continue;
+            }
+            '#' => {
+                // Skip line comment
+                while i < len && chars[i] != '\n' {
+                    i += 1;
+                }
+                continue;
+            }
+            '(' => parens += 1,
+            ')' => parens -= 1,
+            '[' => brackets += 1,
+            ']' => brackets -= 1,
+            '{' => braces += 1,
+            '}' => braces -= 1,
+            _ => {}
+        }
+        i += 1;
+    }
+
+    if parens > 0 || brackets > 0 || braces > 0 {
+        return true;
+    }
+
+    // Check if it ends with -> (expecting a body)
+    if trimmed.ends_with("->") {
+        return true;
+    }
+
+    // Check for trailing keywords that expect more input
+    let last_word = trimmed.rsplit_once(|c: char| c.is_whitespace() || c == ';')
+        .map(|(_, w)| w)
+        .unwrap_or(trimmed);
+    matches!(last_word, "then" | "else" | "elif" | "catch" | "def" | "fun" | "try" | "do")
+}
 
 impl rustyline::Helper for SquareHelper {}
 
@@ -106,12 +212,31 @@ fn toploop(env: &env::Env) {
 
     loop {
         match rl.readline(PROMPT) {
-            Ok(line) => {
-                let line = line.trim();
-                if line.is_empty() {
+            Ok(first_line) => {
+                let mut input = first_line;
+                // Accumulate continuation lines while input looks incomplete
+                while is_incomplete(&input) {
+                    match rl.readline(CONTINUATION_PROMPT) {
+                        Ok(cont) => {
+                            input.push('\n');
+                            input.push_str(&cont);
+                        }
+                        Err(rustyline::error::ReadlineError::Interrupted) => {
+                            println!("^C");
+                            input.clear();
+                            break;
+                        }
+                        Err(_) => {
+                            input.clear();
+                            break;
+                        }
+                    }
+                }
+                let input = input.trim();
+                if input.is_empty() {
                     continue;
                 }
-                match eval_string(env, line) {
+                match eval_string(env, input) {
                     Ok(result) => {
                         let s = result.to_display_string();
                         if s != "[]" {

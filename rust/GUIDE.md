@@ -265,8 +265,7 @@ Like `let`, but bindings can refer to each other (for mutual recursion):
 letrec {
   even: fun n -> if = n 0 then .true else odd [- n 1],
   odd:  fun n -> if = n 0 then .false else even [- n 1],
-}
-even 10
+} even 10
 ```
 
 ### Conditionals `if`/`then`/`elif`/`else`
