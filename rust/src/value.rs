@@ -123,6 +123,12 @@ pub fn init_generics() {
     });
 }
 
+thread_local! {
+    /// Singleton empty list, so that all `()` share the same Rc
+    /// (matches OCaml where `[]` is a compile-time constant).
+    static EMPTY_LIST: Rc<Vec<Value>> = Rc::new(Vec::new());
+}
+
 impl Value {
     /// Convenience constructors that wrap inner data in Rc.
     pub fn string(s: impl Into<String>) -> Value {
@@ -130,7 +136,11 @@ impl Value {
     }
 
     pub fn list(items: Vec<Value>) -> Value {
-        Value::List(Rc::new(items))
+        if items.is_empty() {
+            Value::List(EMPTY_LIST.with(|e| e.clone()))
+        } else {
+            Value::List(Rc::new(items))
+        }
     }
 
     pub fn record(tag: Name, items: Vec<(Name, Value)>) -> Value {
