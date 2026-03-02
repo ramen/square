@@ -820,7 +820,7 @@ def snd fun (_, b) -> b;
 
 (* Error handling *)
 try [/ 1 0]
-catch e -> println "caught an error";
+catch {DivisionByZero} -> println "caught a division by zero";
 
 (* Local bindings *)
 let {x: 10, y: 20} + x y;    (* 30 *)

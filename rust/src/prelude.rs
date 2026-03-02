@@ -563,29 +563,29 @@ pub fn init_prelude(env: &Env) {
     def("*", arith_op(|a, b| a * b, |a, b| a * b));
     def(
         "/",
-        arith_op(
-            |a, b| {
-                if b == 0 {
-                    0 // or error, but OCaml would crash
-                } else {
-                    a / b
-                }
-            },
-            |a, b| a / b,
-        ),
+        func2(|a, b| match (&a, &b) {
+            (Value::Int(_), Value::Int(0)) => {
+                Err(Value::error(Name::new("DivisionByZero"), "division by zero"))
+            }
+            (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a / b)),
+            (Value::Int(a), Value::Float(b)) => Ok(Value::Float(*a as f64 / b)),
+            (Value::Float(a), Value::Int(b)) => Ok(Value::Float(a / *b as f64)),
+            (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a / b)),
+            _ => Err(Value::error(Names::e_type(), "arguments must be numbers")),
+        }),
     );
     def(
         "%",
-        arith_op(
-            |a, b| {
-                if b == 0 {
-                    0
-                } else {
-                    a % b
-                }
-            },
-            |a, b| a % b,
-        ),
+        func2(|a, b| match (&a, &b) {
+            (Value::Int(_), Value::Int(0)) => {
+                Err(Value::error(Name::new("DivisionByZero"), "division by zero"))
+            }
+            (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a % b)),
+            (Value::Int(a), Value::Float(b)) => Ok(Value::Float(*a as f64 % b)),
+            (Value::Float(a), Value::Int(b)) => Ok(Value::Float(a % *b as f64)),
+            (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a % b)),
+            _ => Err(Value::error(Names::e_type(), "arguments must be numbers")),
+        }),
     );
     def(
         "**",
