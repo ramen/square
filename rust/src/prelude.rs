@@ -1363,11 +1363,11 @@ def range fun args ->
     result: (),
     loop: fun [] ->
       if in_range current stop
-      then [let {v: current} := current [+ current step]; !cons result v; loop []]
+      then [let {v: current} [:= current [+ current step]; !add result v; loop []]]
       else result,
     current: start,
   }
-  reverse [loop []];
+  loop [];
 
 def ref fun value ->
   tag .ref {value: fun [] -> value,
