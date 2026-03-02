@@ -1,0 +1,75 @@
+(* Test basic arithmetic and functions *)
+println "--- Basic arithmetic ---";
+println [+ 2 3];
+println [- 10 4];
+println [* 3 7];
+
+(* Test string operations *)
+println "--- Strings ---";
+println [join ", " ("hello", "world")];
+println [size "testing"];
+
+(* Test lists *)
+println "--- Lists ---";
+def mylist (1, 2, 3, 4, 5);
+println [string mylist];
+println [head mylist];
+println [string [tail mylist]];
+println [size mylist];
+
+(* Test records *)
+println "--- Records ---";
+def myrec {name: "Square", version: "0.2.3"};
+println [string myrec];
+println [myrec .name];
+println [myrec .version];
+
+(* Test if/then/else *)
+println "--- Conditionals ---";
+println [if > 5 3 then "5 > 3" else "5 <= 3"];
+println [if < 1 2 then "1 < 2" else "1 >= 2"];
+
+(* Test functions *)
+println "--- Functions ---";
+def double fun x -> * 2 x;
+println [double 21];
+
+def add fun x -> fun y -> + x y;
+println [add 10 20];
+
+(* Test let bindings *)
+println "--- Let bindings ---";
+println [let {x: 10, y: 20} + x y];
+
+(* Test map/fold *)
+println "--- Map and Fold ---";
+println [string [map (1, 2, 3, 4, 5) [fun x -> * x x]]];
+println [fold (1, 2, 3, 4, 5) [fun (_, v, a) -> + a v] 0];
+
+(* Test try/catch *)
+println "--- Try/Catch ---";
+println [try throw {MyError: "oops"} catch {MyError} -> join "" ("caught: ", MyError)];
+
+(* Test higher-order functions *)
+println "--- Higher-order ---";
+def apply fun f -> fun x -> f x;
+println [apply double 7];
+
+(* Test pattern matching on functions *)
+println "--- Patterns ---";
+def swap fun (a, b) -> (b, a);
+println [string [swap (1, 2)]];
+
+def get_name fun {name} -> name;
+println [get_name {name: "Alice", age: 30}];
+
+(* Simple countdown without tailrec *)
+println "--- Countdown ---";
+def countdown fun n ->
+    if > n 0
+    then [println n; countdown [- n 1]]
+    else println "blastoff!";
+
+countdown 3;
+
+println "--- Done! ---";

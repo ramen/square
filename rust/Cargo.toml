@@ -1,0 +1,9 @@
+[package]
+name = "square"
+version = "0.2.3"
+edition = "2024"
+description = "Square programming language - ported from OCaml"
+
+[dependencies]
+rustyline = "15"
+regex = "1"
