@@ -271,11 +271,13 @@ letrec {
 ### Conditionals `if`/`then`/`elif`/`else`
 
 ```
-if > x 0
-then "positive"
-elif = x 0
-then "zero"
-else "negative"
+if > x 0 then [
+  "positive"
+] elif = x 0 then [
+  "zero"
+] else [
+  "negative"
+]
 ```
 
 Without `else`, a false condition returns `[]` (None).
@@ -372,13 +374,13 @@ add5 10    (* 15 *)
 ### The `!` mutator syntax
 
 `!` is shorthand for applying a function and assigning the result back.
-`!f x` is equivalent to `:= x [f x ...]`:
+`!f x args...` is equivalent to `:= x [f x args...]`:
 
 ```
-def items ();
-!cons items 1;
-!cons items 2;
-println items;    (* prints: 21 — items is now (2, 1) *)
+def counter 0;
+!+ counter 1;
+!+ counter 1;
+counter    (* 2 *)
 ```
 
 ---
