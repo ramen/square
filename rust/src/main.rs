@@ -8,6 +8,7 @@ mod parser;
 mod prelude;
 mod value;
 
+use std::borrow::Cow;
 use std::rc::Rc;
 
 use env::{add_binding, new_env};
@@ -17,10 +18,35 @@ use lexer::Lexer;
 use name::Name;
 use names::Names;
 use parser::Parser;
+use rustyline::highlight::Highlighter;
 use value::{init_generics, SquareError, Value};
 
 const VERSION: &str = "0.2.3";
 const PROMPT: &str = ":: ";
+
+struct SquareHelper;
+
+impl Highlighter for SquareHelper {
+    fn highlight_prompt<'b, 's: 'b, 'p: 'b>(
+        &'s self,
+        prompt: &'p str,
+        _default: bool,
+    ) -> Cow<'b, str> {
+        Cow::Owned(format!("\x1b[1;36m{}\x1b[0m", prompt))
+    }
+}
+
+impl rustyline::completion::Completer for SquareHelper {
+    type Candidate = String;
+}
+
+impl rustyline::hint::Hinter for SquareHelper {
+    type Hint = String;
+}
+
+impl rustyline::validate::Validator for SquareHelper {}
+
+impl rustyline::Helper for SquareHelper {}
 
 fn load_file(env: &env::Env, filename: &str) -> Result<(), SquareError> {
     let source = if filename == "-" {
@@ -74,8 +100,9 @@ fn toploop(env: &env::Env) {
     let config = rustyline::Config::builder()
         .auto_add_history(true)
         .build();
-    let mut rl = rustyline::DefaultEditor::with_config(config)
+    let mut rl = rustyline::Editor::with_config(config)
         .expect("Failed to create line editor");
+    rl.set_helper(Some(SquareHelper));
 
     loop {
         match rl.readline(PROMPT) {
@@ -86,10 +113,13 @@ fn toploop(env: &env::Env) {
                 }
                 match eval_string(env, line) {
                     Ok(result) => {
-                        println!("{}", result.to_display_string());
+                        let s = result.to_display_string();
+                        if s != "[]" {
+                            println!("\x1b[32m{}\x1b[0m", s);
+                        }
                     }
                     Err(e) => {
-                        println!("Error: {}", e.value.to_display_string());
+                        println!("\x1b[1;31mError:\x1b[0m \x1b[31m{}\x1b[0m", e.value.to_display_string());
                     }
                 }
             }
@@ -142,7 +172,7 @@ fn main() {
 
     let args: Vec<String> = std::env::args().collect();
     if args.len() <= 1 {
-        println!("Welcome to [s]quare version {}!", VERSION);
+        println!("\x1b[1mWelcome to \x1b[36m[s]quare\x1b[0m\x1b[1m version {}!\x1b[0m", VERSION);
         toploop(&env);
         println!();
     } else {
