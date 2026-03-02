@@ -1,0 +1,191 @@
+(* fsql.sq - Functional SQL query string creation tools
+   Author:   Dave Benjamin <ramen@ramenfest.com>
+   Original: 03/25/2005 (Python)
+   Ported:   01/09/2006 (PHP)
+   Ported:   03/02/2026 (Square)
+
+   This module provides functional tools for creating SQL query strings.
+
+   Because they do not do any database communication, these functions can be
+   used with any database API as long as the database supports SQL syntax.
+   These functions should all produce standard SQL. *)
+
+def Fsql module {
+
+  (* --- Types --- *)
+
+  (* A literal value that will not be SQL-quoted. *)
+  literal: fun value -> tag .fsql_literal {value: value},
+
+  (* A range pair for use in BETWEEN queries. *)
+  range: fun start -> fun finish -> tag .fsql_range {start: start, finish: finish},
+
+  (* --- Quoting --- *)
+
+  (* Returns the SQL-quoted string representation of its input. *)
+  quote: fun value ->
+    if is .none [typeof value]
+    then "NULL"
+    elif is .symbol [typeof value]
+    then [if is value .true then "TRUE"
+          elif is value .false then "FALSE"
+          else [string value]]
+    elif is .int [typeof value]
+    then [string value]
+    elif is .float [typeof value]
+    then [string value]
+    elif is .fsql_literal [typeof value]
+    then [string [value .value]]
+    else join "" ("'", [replace "'" "''" [string value]], "'"),
+
+  (* Returns a list of comma-separated, SQL-quoted values. *)
+  join_quoted: fun items ->
+    join ", " [map items [fun item -> Fsql.quote item]],
+
+  (* --- Field clauses --- *)
+
+  (* Returns a where clause of the form "key = 'val'". *)
+  field_value: fun (key, val) ->
+    join "" ([symbol_name key], " = ", [Fsql.quote val]),
+
+  (* Returns a where clause of the form "key IS val". *)
+  field_ident: fun (key, val) ->
+    join "" ([symbol_name key], " IS ", [Fsql.quote val]),
+
+  (* Returns a where clause of the form "key IN (y0, y1, ...)". *)
+  field_list: fun (key, val) ->
+    if empty val
+    then "1 = 0"
+    else join "" ([symbol_name key], " IN (", [Fsql.join_quoted val], ")"),
+
+  (* Returns a where clause of the form "key BETWEEN start AND finish". *)
+  field_range: fun (key, val) ->
+    join "" ([symbol_name key], " BETWEEN ",
+             [string [val .start]], " AND ", [string [val .finish]]),
+
+  (* Returns a where clause of the form "key LIKE '[%]val[%]'".
+     Mode should be one of: .start, .end, .both, .none.
+     If mode is .none, returns the result of field_value instead. *)
+  field_like: fun mode -> fun (key, val) ->
+    if is mode .none
+    then [Fsql.field_value (key, val)]
+    else [
+      let {v: string val}
+      let {v: if or (is mode .start, is mode .both) then join "" (v, "%") else v}
+      let {v: if or (is mode .end, is mode .both) then join "" ("%", v) else v}
+      join "" ([symbol_name key], " LIKE ", [Fsql.quote v])
+    ],
+
+  (* Returns a where clause from a record.
+
+     The following mappings occur for record values:
+      - [] (none):       key IS NULL
+      - list:            key IN (v1, v2, ...)
+      - .fsql_range:     key BETWEEN start AND finish
+      - string:          key = 'val' (or key LIKE 'val%', etc. depending on mode)
+      - other:           key = val
+
+     "match" should be either .any or .all, specifying what type of
+     match to perform (any of the values vs. all of the values).
+
+     "mode" should be the desired string-matching mode (see field_like). *)
+  lookup: fun args -> fun where ->
+    let {
+      match: if in args .match then args.match else .all,
+      mode:  if in args .mode  then args.mode  else .none,
+    }
+    let {sep: if is match .all then " AND " else " OR "}
+    join sep [map [pairs where] [fun (key, val) ->
+      if is .none [typeof val]
+      then [Fsql.field_ident (key, val)]
+      elif is .list [typeof val]
+      then [Fsql.field_list (key, val)]
+      elif is .fsql_range [typeof val]
+      then [Fsql.field_range (key, val)]
+      elif is .string [typeof val]
+      then [Fsql.field_like mode (key, val)]
+      else [Fsql.field_value (key, val)]
+    ]],
+
+  (* --- Query functions --- *)
+
+  (* Returns an SQL SELECT query.
+
+     "table" is the table name (string or []).
+     "where" can be a string or a record (parsed with lookup).
+     "fields" is a list of field names, or the string "*".
+     "options" is a record with optional keys:
+       .groupBy, .having, .orderBy, .limit, .distinct *)
+  select: fun args ->
+    let {
+      table:   if in args .table   then args.table   else [],
+      where:   if in args .where   then args.where   else [],
+      fields:  if in args .fields  then args.fields  else "*",
+      groupBy: if in args .groupBy then args.groupBy else [],
+      having:  if in args .having  then args.having  else [],
+      orderBy: if in args .orderBy then args.orderBy else [],
+      limit:   if in args .limit   then args.limit   else [],
+      distinct: if in args .distinct then args.distinct else [],
+    }
+    let {
+      where: if is .record [typeof where]
+             then [Fsql.lookup {} where]
+             else where,
+      fields: if is .string [typeof fields]
+              then (fields,)
+              else fields,
+    }
+    join "" (
+      "SELECT ",
+      [if distinct then "DISTINCT " else ""],
+      [join ", " fields],
+      [if table   then join "" (" FROM ",     table)              else ""],
+      [if where   then join "" (" WHERE ",    where)              else ""],
+      [if groupBy then join "" (" GROUP BY ", groupBy)            else ""],
+      [if having  then join "" (" HAVING ",   having)             else ""],
+      [if orderBy then join "" (" ORDER BY ", orderBy)            else ""],
+      [if limit   then join "" (" LIMIT ",    [string limit])     else ""],
+    ),
+
+  (* Returns an SQL INSERT query.
+
+     "table" is the table name.
+     "row" is a record representing the row to insert.
+     Keys will be used as field names in the query. *)
+  insert: fun table -> fun row ->
+    let {
+      keys: map [fields row] [fun f -> symbol_name f],
+      vals: values row,
+    }
+    join "" ("INSERT INTO ", table,
+             " (", [join ", " keys], ")",
+             " VALUES (", [Fsql.join_quoted vals], ")"),
+
+  (* Returns an SQL UPDATE query.
+
+     "table" is the table name.
+     "row" is a record of field/value pairs to set.
+     "where" can be a string or a record (parsed with lookup). *)
+  update: fun table -> fun row -> fun where ->
+    let {
+      where: if is .record [typeof where]
+             then [Fsql.lookup {} where]
+             else where,
+      sets: map [pairs row] [fun pair -> Fsql.field_value pair],
+    }
+    join "" ("UPDATE ", table,
+             " SET ", [join ", " sets],
+             " WHERE ", where),
+
+  (* Returns an SQL DELETE query.
+
+     "table" is the table name.
+     "where" can be a string or a record (parsed with lookup). *)
+  delete: fun table -> fun where ->
+    let {
+      where: if is .record [typeof where]
+             then [Fsql.lookup {} where]
+             else where,
+    }
+    join "" ("DELETE FROM ", table, " WHERE ", where),
+};
