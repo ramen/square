@@ -47,7 +47,7 @@ impl EnvInner {
         for (k, v) in &self.bindings {
             map.insert(*k, v.borrow().clone());
         }
-        Value::Record(crate::names::Names::record(), map)
+        Value::Record(crate::names::Names::record(), std::rc::Rc::new(map))
     }
 }
 

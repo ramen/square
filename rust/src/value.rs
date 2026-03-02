@@ -15,12 +15,12 @@ pub type NativeFn = dyn Fn(Value) -> Result<Value, SquareError>;
 pub enum Value {
     None,
     Symbol(Name),
-    String(String),
+    String(Rc<String>),
     Int(i64),
     Float(f64),
     Char(char),
-    List(Vec<Value>),
-    Record(Name, NameMap<Value>),
+    List(Rc<Vec<Value>>),
+    Record(Name, Rc<NameMap<Value>>),
     Function(Rc<NativeFn>),
 }
 
@@ -94,9 +94,9 @@ impl Generics {
             for (tag, val) in inner_map {
                 inner.insert(*tag, val.clone());
             }
-            outer.insert(*func, Value::Record(Names::record(), inner));
+            outer.insert(*func, Value::Record(Names::record(), Rc::new(inner)));
         }
-        Value::Record(Names::record(), outer)
+        Value::Record(Names::record(), Rc::new(outer))
     }
 }
 
@@ -112,7 +112,7 @@ pub fn init_generics() {
                 .iter()
                 .map(|(k, v)| format!("{}: {}", k, v.to_display_string()))
                 .collect();
-            Ok(Value::String(format!("{{{}}}", parts.join(", "))))
+            Ok(Value::string(format!("{{{}}}", parts.join(", "))))
         } else {
             Err(Value::error(Names::e_value(), "argument must be a record"))
         }
@@ -124,18 +124,27 @@ pub fn init_generics() {
 }
 
 impl Value {
+    /// Convenience constructors that wrap inner data in Rc.
+    pub fn string(s: impl Into<String>) -> Value {
+        Value::String(Rc::new(s.into()))
+    }
+
+    pub fn list(items: Vec<Value>) -> Value {
+        Value::List(Rc::new(items))
+    }
+
     pub fn record(tag: Name, items: Vec<(Name, Value)>) -> Value {
         let mut map = NameMap::new();
         for (k, v) in items {
             map.insert(k, v);
         }
-        Value::Record(tag, map)
+        Value::Record(tag, Rc::new(map))
     }
 
     pub fn error(code: Name, msg: &str) -> SquareError {
         SquareError::new(Value::record(
             Names::record(),
-            vec![(code, Value::String(msg.to_string()))],
+            vec![(code, Value::string(msg))],
         ))
     }
 
@@ -176,7 +185,7 @@ impl Value {
         match self {
             Value::None => "[]".to_string(),
             Value::Symbol(n) => format!(".{}", n),
-            Value::String(s) => s.clone(),
+            Value::String(s) => s.to_string(),
             Value::Int(i) => i.to_string(),
             Value::Float(f) => {
                 // Match OCaml's float formatting
@@ -200,7 +209,7 @@ impl Value {
                 });
                 if let Some(Value::Function(f)) = func {
                     match f(self.clone()) {
-                        Ok(Value::String(s)) => s,
+                        Ok(Value::String(s)) => s.to_string(),
                         _ => format!("<{}>", tag),
                     }
                 } else {
@@ -261,7 +270,7 @@ impl Value {
                         g.get(Name::new("compare"), *t1).cloned()
                     });
                     let result = if let Some(Value::Function(f)) = func {
-                        Some(f(Value::List(vec![self.clone(), other.clone()])))
+                        Some(f(Value::list(vec![self.clone(), other.clone()])))
                     } else {
                         Option::None
                     };

@@ -17,20 +17,20 @@ pub fn eval(env: &Env, ast: &Ast) -> Result<Value, SquareError> {
             Ok(cell.borrow().clone())
         }
         Ast::Symbol(n) => Ok(Value::Symbol(*n)),
-        Ast::String(s) => Ok(Value::String(s.clone())),
+        Ast::String(s) => Ok(Value::string(s.clone())),
         Ast::Int(i) => Ok(Value::Int(*i)),
         Ast::Float(f) => Ok(Value::Float(*f)),
         Ast::Char(c) => Ok(Value::Char(*c)),
         Ast::List(l) => {
             let vals: Result<Vec<Value>, _> = l.iter().map(|a| eval(env, a)).collect();
-            Ok(Value::List(vals?))
+            Ok(Value::list(vals?))
         }
         Ast::Record(r) => {
             let mut map = NameMap::new();
             for (k, v) in r {
                 map.insert(*k, eval(env, v)?);
             }
-            Ok(Value::Record(Names::record(), map))
+            Ok(Value::Record(Names::record(), Rc::new(map)))
         }
         Ast::Do(stmts) => {
             if stmts.is_empty() {
@@ -213,7 +213,7 @@ fn eval_fun(env: &Env, pat: &Pattern, body: &Ast) -> Result<Value, SquareError> 
                         ));
                     }
                     let new_env = child_env(&captured_env);
-                    for (n, v) in names.iter().zip(args.into_iter()) {
+                    for (n, v) in names.iter().zip(args.iter().cloned()) {
                         new_env.borrow_mut().define(*n, v);
                     }
                     eval(&new_env, &body)

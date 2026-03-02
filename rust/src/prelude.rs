@@ -8,6 +8,24 @@ use crate::name::Name;
 use crate::names::Names;
 use crate::value::{SquareError, Value, GENERICS};
 
+/// Identity comparison, analogous to OCaml's physical equality (==).
+/// Scalars (None, Symbol, Int, Float, Char) are compared by value.
+/// Rc-wrapped types (String, List, Record, Function) are compared by pointer identity.
+fn value_is(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::None, Value::None) => true,
+        (Value::Symbol(a), Value::Symbol(b)) => a == b,
+        (Value::Int(a), Value::Int(b)) => a == b,
+        (Value::Float(a), Value::Float(b)) => a == b,
+        (Value::Char(a), Value::Char(b)) => a == b,
+        (Value::String(a), Value::String(b)) => Rc::ptr_eq(a, b),
+        (Value::List(a), Value::List(b)) => Rc::ptr_eq(a, b),
+        (Value::Record(_, a), Value::Record(_, b)) => Rc::ptr_eq(a, b),
+        (Value::Function(a), Value::Function(b)) => Rc::ptr_eq(a, b),
+        _ => false,
+    }
+}
+
 /// Helper: create a 1-arg native function.
 fn func1(f: impl Fn(Value) -> Result<Value, SquareError> + 'static) -> Value {
     Value::Function(Rc::new(f))
@@ -90,19 +108,12 @@ pub fn init_prelude(env: &Env) {
     );
 
     // -- is (identity comparison) --
+    // Analogous to OCaml's physical equality (==). Uses Rc::ptr_eq for
+    // String, List, Record, and Function; value equality for scalars.
     def(
         "is",
         func2(|x, y| {
-            let result = match (&x, &y) {
-                (Value::Symbol(a), Value::Symbol(b)) => a == b,
-                (Value::None, Value::None) => true,
-                (Value::Int(a), Value::Int(b)) => a == b,
-                (Value::Float(a), Value::Float(b)) => a == b,
-                (Value::Char(a), Value::Char(b)) => a == b,
-                (Value::String(a), Value::String(b)) => std::ptr::eq(a.as_str(), b.as_str()),
-                _ => false,
-            };
-            Ok(Value::from_bool(result))
+            Ok(Value::from_bool(value_is(&x, &y)))
         }),
     );
 
@@ -121,7 +132,7 @@ pub fn init_prelude(env: &Env) {
     // -- string --
     def(
         "string",
-        func1(|x| Ok(Value::String(x.to_display_string()))),
+        func1(|x| Ok(Value::string(x.to_display_string()))),
     );
 
     // -- symbol --
@@ -138,7 +149,7 @@ pub fn init_prelude(env: &Env) {
     def(
         "symbol_name",
         func1(|x| match x {
-            Value::Symbol(n) => Ok(Value::String(n.to_string())),
+            Value::Symbol(n) => Ok(Value::string(n.to_string())),
             _ => Err(Value::error(Names::e_type(), "argument must be a symbol")),
         }),
     );
@@ -197,7 +208,7 @@ pub fn init_prelude(env: &Env) {
         func1(|x| {
             match &x {
                 Value::List(list) => {
-                    for v in list {
+                    for v in list.iter() {
                         print!("{}", v.to_display_string());
                     }
                 }
@@ -214,9 +225,10 @@ pub fn init_prelude(env: &Env) {
     def(
         "cons",
         func2(|x, list| match list {
-            Value::List(mut l) => {
-                l.insert(0, x);
-                Ok(Value::List(l))
+            Value::List(l) => {
+                let mut v = (*l).clone();
+                v.insert(0, x);
+                Ok(Value::list(v))
             }
             _ => Err(Value::error(Names::e_type(), "second argument must be a list")),
         }),
@@ -241,7 +253,7 @@ pub fn init_prelude(env: &Env) {
             Value::List(l) if l.is_empty() => {
                 Err(Value::error(Names::e_type(), "list must not be empty"))
             }
-            Value::List(l) => Ok(Value::List(l[1..].to_vec())),
+            Value::List(l) => Ok(Value::list(l[1..].to_vec())),
             _ => Err(Value::error(Names::e_type(), "argument must be a list")),
         }),
     );
@@ -280,7 +292,7 @@ pub fn init_prelude(env: &Env) {
                         Value::String(s) => {
                             let mut acc = init;
                             for (i, c) in s.chars().enumerate() {
-                                acc = f(Value::List(vec![
+                                acc = f(Value::list(vec![
                                     Value::Int(i as i64),
                                     Value::Char(c),
                                     acc,
@@ -291,7 +303,7 @@ pub fn init_prelude(env: &Env) {
                         Value::List(l) => {
                             let mut acc = init;
                             for (i, v) in l.iter().enumerate() {
-                                acc = f(Value::List(vec![
+                                acc = f(Value::list(vec![
                                     Value::Int(i as i64),
                                     v.clone(),
                                     acc,
@@ -306,15 +318,15 @@ pub fn init_prelude(env: &Env) {
                                 g.get(Name::new("fold"), *tag).cloned()
                             });
                             if let Some(Value::Function(gf)) = func {
-                                return gf(Value::List(vec![
+                                return gf(Value::list(vec![
                                     xs.clone(),
                                     Value::Function(f.clone()),
                                     init.clone(),
                                 ]));
                             }
                             let mut acc = init;
-                            for (k, v) in r {
-                                acc = f(Value::List(vec![
+                            for (k, v) in r.iter() {
+                                acc = f(Value::list(vec![
                                     Value::Symbol(*k),
                                     v.clone(),
                                     acc,
@@ -383,7 +395,7 @@ pub fn init_prelude(env: &Env) {
                 .map(|i| Value::Int(i as i64))
                 .ok_or_else(|| Value::error_value(Names::e_value_nf(), item)),
             Value::Record(_, r) => {
-                for (k, v) in r {
+                for (k, v) in r.iter() {
                     if *v == item {
                         return Ok(Value::Symbol(*k));
                     }
@@ -401,14 +413,15 @@ pub fn init_prelude(env: &Env) {
     def(
         "sort_with",
         func2(|cmp_fn, list| match (&cmp_fn, list) {
-            (Value::Function(f), Value::List(mut l)) => {
+            (Value::Function(f), Value::List(l)) => {
                 let f = f.clone();
+                let mut v = (*l).clone();
                 let mut err: Option<SquareError> = None;
-                l.sort_by(|a, b| {
+                v.sort_by(|a, b| {
                     if err.is_some() {
                         return std::cmp::Ordering::Equal;
                     }
-                    match f(Value::List(vec![a.clone(), b.clone()])) {
+                    match f(Value::list(vec![a.clone(), b.clone()])) {
                         Ok(Value::Symbol(n)) if n == Names::lt() => std::cmp::Ordering::Less,
                         Ok(Value::Symbol(n)) if n == Names::eq() => std::cmp::Ordering::Equal,
                         Ok(Value::Symbol(n)) if n == Names::gt() => std::cmp::Ordering::Greater,
@@ -428,7 +441,7 @@ pub fn init_prelude(env: &Env) {
                 if let Some(e) = err {
                     return Err(e);
                 }
-                Ok(Value::List(l))
+                Ok(Value::list(v))
             }
             (Value::Function(_), _) => Err(Value::error(
                 Names::e_type(),
@@ -588,8 +601,8 @@ pub fn init_prelude(env: &Env) {
         func1(|x| match x {
             Value::List(l) => {
                 let mut acc = Value::Int(0);
-                for v in l {
-                    acc = arith_op_apply(|a, b| a + b, |a, b| a + b, acc, v)?;
+                for v in l.iter() {
+                    acc = arith_op_apply(|a, b| a + b, |a, b| a + b, acc, v.clone())?;
                 }
                 Ok(acc)
             }
@@ -603,8 +616,8 @@ pub fn init_prelude(env: &Env) {
         func1(|x| match x {
             Value::List(l) => {
                 let mut acc = Value::Int(1);
-                for v in l {
-                    acc = arith_op_apply(|a, b| a * b, |a, b| a * b, acc, v)?;
+                for v in l.iter() {
+                    acc = arith_op_apply(|a, b| a * b, |a, b| a * b, acc, v.clone())?;
                 }
                 Ok(acc)
             }
@@ -617,18 +630,18 @@ pub fn init_prelude(env: &Env) {
         "add",
         func1(|container| match container {
             Value::List(l) => Ok(func1(move |x| {
-                let mut new_list = l.clone();
+                let mut new_list = (*l).clone();
                 new_list.push(x);
-                Ok(Value::List(new_list))
+                Ok(Value::list(new_list))
             })),
             Value::Record(tag, oldvals) => Ok(func1(move |sym| match sym {
                 Value::Symbol(n) => {
                     let tag = tag;
                     let oldvals = oldvals.clone();
                     Ok(func1(move |x| {
-                        let mut new_map = oldvals.clone();
+                        let mut new_map = (*oldvals).clone();
                         new_map.insert(n, x);
-                        Ok(Value::Record(tag, new_map))
+                        Ok(Value::Record(tag, Rc::new(new_map)))
                     }))
                 }
                 _ => Err(Value::error(
@@ -649,9 +662,9 @@ pub fn init_prelude(env: &Env) {
         func1(|x| match x {
             Value::List(l) => {
                 let mut result = Vec::new();
-                for item in l {
+                for item in l.iter() {
                     match item {
-                        Value::List(sub) => result.extend(sub),
+                        Value::List(sub) => result.extend(sub.iter().cloned()),
                         _ => {
                             return Err(Value::error(
                                 Names::e_type(),
@@ -660,7 +673,7 @@ pub fn init_prelude(env: &Env) {
                         }
                     }
                 }
-                Ok(Value::List(result))
+                Ok(Value::list(result))
             }
             _ => Err(Value::error(Names::e_type(), "argument must be a list")),
         }),
@@ -671,7 +684,7 @@ pub fn init_prelude(env: &Env) {
         "join",
         func2(|sep, list| {
             let sep_str = match &sep {
-                Value::String(s) => s.clone(),
+                Value::String(s) => (**s).clone(),
                 Value::Char(c) => c.to_string(),
                 _ => {
                     return Err(Value::error(
@@ -683,7 +696,7 @@ pub fn init_prelude(env: &Env) {
             match list {
                 Value::List(l) => {
                     let parts: Vec<String> = l.iter().map(|v| v.to_display_string()).collect();
-                    Ok(Value::String(parts.join(&sep_str)))
+                    Ok(Value::string(parts.join(&sep_str)))
                 }
                 _ => Err(Value::error(
                     Names::e_type(),
@@ -698,7 +711,7 @@ pub fn init_prelude(env: &Env) {
         "split",
         func2(|delim, s| {
             let delim_str = match &delim {
-                Value::String(s) => s.clone(),
+                Value::String(s) => (**s).clone(),
                 Value::Char(c) => c.to_string(),
                 _ => {
                     return Err(Value::error(
@@ -711,9 +724,9 @@ pub fn init_prelude(env: &Env) {
                 Value::String(s) => {
                     let parts: Vec<Value> = s
                         .split(&delim_str)
-                        .map(|p| Value::String(p.to_string()))
+                        .map(|p| Value::string(p.to_string()))
                         .collect();
-                    Ok(Value::List(parts))
+                    Ok(Value::list(parts))
                 }
                 _ => Err(Value::error(
                     Names::e_type(),
@@ -760,7 +773,7 @@ pub fn init_prelude(env: &Env) {
                     };
                     let end = end.min(s.len());
                     let start = start.min(end);
-                    Ok(Value::String(s[start..end].to_string()))
+                    Ok(Value::string(s[start..end].to_string()))
                 }
                 Value::List(l) => {
                     let len = l.len() as i64;
@@ -776,7 +789,7 @@ pub fn init_prelude(env: &Env) {
                     };
                     let end = end.min(l.len());
                     let start = start.min(end);
-                    Ok(Value::List(l[start..end].to_vec()))
+                    Ok(Value::list(l[start..end].to_vec()))
                 }
                 _ => Err(Value::error(
                     Names::e_type(),
@@ -790,7 +803,7 @@ pub fn init_prelude(env: &Env) {
     def(
         "lowercase",
         func1(|x| match x {
-            Value::String(s) => Ok(Value::String(s.to_lowercase())),
+            Value::String(s) => Ok(Value::string(s.to_lowercase())),
             Value::Char(c) => Ok(Value::Char(
                 c.to_lowercase().next().unwrap_or(c),
             )),
@@ -805,7 +818,7 @@ pub fn init_prelude(env: &Env) {
     def(
         "uppercase",
         func1(|x| match x {
-            Value::String(s) => Ok(Value::String(s.to_uppercase())),
+            Value::String(s) => Ok(Value::string(s.to_uppercase())),
             Value::Char(c) => Ok(Value::Char(
                 c.to_uppercase().next().unwrap_or(c),
             )),
@@ -856,11 +869,12 @@ pub fn init_prelude(env: &Env) {
     def(
         "update",
         func2(|a, b| match (a, b) {
-            (Value::Record(tag, mut oldvals), Value::Record(_, newvals)) => {
-                for (k, v) in newvals {
-                    oldvals.insert(k, v);
+            (Value::Record(tag, oldvals), Value::Record(_, newvals)) => {
+                let mut merged = (*oldvals).clone();
+                for (k, v) in newvals.iter() {
+                    merged.insert(*k, v.clone());
                 }
-                Ok(Value::Record(tag, oldvals))
+                Ok(Value::Record(tag, Rc::new(merged)))
             }
             (Value::Record(_, _), _) => Err(Value::error(
                 Names::e_type(),
@@ -877,9 +891,10 @@ pub fn init_prelude(env: &Env) {
     def(
         "remove",
         func2(|rec, sym| match (rec, &sym) {
-            (Value::Record(tag, mut r), Value::Symbol(n)) => {
-                r.remove(n);
-                Ok(Value::Record(tag, r))
+            (Value::Record(tag, r), Value::Symbol(n)) => {
+                let mut new_r = (*r).clone();
+                new_r.remove(n);
+                Ok(Value::Record(tag, Rc::new(new_r)))
             }
             (Value::Record(_, _), _) => Err(Value::error(
                 Names::e_type(),
@@ -919,7 +934,7 @@ pub fn init_prelude(env: &Env) {
                     line.pop();
                 }
             }
-            Ok(Value::String(line))
+            Ok(Value::string(line))
         }),
     );
 
@@ -932,7 +947,7 @@ pub fn init_prelude(env: &Env) {
                     Name::new("open_in"),
                     func1(|x| match x {
                         Value::String(filename) => {
-                            let content = std::fs::read_to_string(&filename).map_err(|e| {
+                            let content = std::fs::read_to_string(filename.as_ref()).map_err(|e| {
                                 Value::error(Name::new("IOError"), &e.to_string())
                             })?;
                             // Return a simple file record with read method
@@ -941,7 +956,7 @@ pub fn init_prelude(env: &Env) {
                                 vec![
                                     (
                                         Name::new("read"),
-                                        func1(move |_| Ok(Value::String(content.clone()))),
+                                        func1(move |_| Ok(Value::string(content.clone()))),
                                     ),
                                     (Name::new("close"), func1(|_| Ok(Value::None))),
                                 ],
@@ -955,7 +970,7 @@ pub fn init_prelude(env: &Env) {
                     func1(|x| match x {
                         Value::String(filename) => {
                             let file = Rc::new(RefCell::new(
-                                std::fs::File::create(&filename).map_err(|e| {
+                                std::fs::File::create(filename.as_ref()).map_err(|e| {
                                     Value::error(Name::new("IOError"), &e.to_string())
                                 })?,
                             ));
@@ -1039,16 +1054,16 @@ pub fn init_prelude(env: &Env) {
             vec![
                 (
                     Name::new("args"),
-                    Value::List(
+                    Value::list(
                         std::env::args()
-                            .map(|a| Value::String(a))
+                            .map(|a| Value::string(a))
                             .collect(),
                     ),
                 ),
                 (
                     Name::new("getcwd"),
                     func1(|_| {
-                        Ok(Value::String(
+                        Ok(Value::string(
                             std::env::current_dir()
                                 .map(|p| p.to_string_lossy().to_string())
                                 .unwrap_or_default(),
@@ -1059,7 +1074,7 @@ pub fn init_prelude(env: &Env) {
                     Name::new("chdir"),
                     func1(|x| match x {
                         Value::String(s) => {
-                            std::env::set_current_dir(&s).map_err(|e| {
+                            std::env::set_current_dir(s.as_ref()).map_err(|e| {
                                 Value::error(Name::new("OSError"), &e.to_string())
                             })?;
                             Ok(Value::None)
@@ -1071,14 +1086,14 @@ pub fn init_prelude(env: &Env) {
                     Name::new("listdir"),
                     func1(|x| match x {
                         Value::String(s) => {
-                            let entries: Result<Vec<Value>, _> = std::fs::read_dir(&s)
+                            let entries: Result<Vec<Value>, _> = std::fs::read_dir(s.as_ref())
                                 .map_err(|e| {
                                     Value::error(Name::new("OSError"), &e.to_string())
                                 })?
                                 .map(|entry| {
                                     entry
                                         .map(|e| {
-                                            Value::String(
+                                            Value::string(
                                                 e.file_name().to_string_lossy().to_string(),
                                             )
                                         })
@@ -1087,7 +1102,7 @@ pub fn init_prelude(env: &Env) {
                                         })
                                 })
                                 .collect();
-                            Ok(Value::List(entries?))
+                            Ok(Value::list(entries?))
                         }
                         _ => Err(Value::error(Names::e_type(), "argument must be a string")),
                     }),
@@ -1098,11 +1113,11 @@ pub fn init_prelude(env: &Env) {
                         Value::String(cmd) => {
                             let status = if cfg!(target_os = "windows") {
                                 std::process::Command::new("cmd")
-                                    .args(["/C", &cmd])
+                                    .args(["/C", cmd.as_ref()])
                                     .status()
                             } else {
                                 std::process::Command::new("sh")
-                                    .args(["-c", &cmd])
+                                    .args(["-c", cmd.as_ref()])
                                     .status()
                             };
                             match status {
@@ -1128,7 +1143,7 @@ pub fn init_prelude(env: &Env) {
                 (
                     Name::new("quote"),
                     func1(|x| {
-                        Ok(Value::String(regex::escape(&x.to_display_string())))
+                        Ok(Value::string(regex::escape(&x.to_display_string())))
                     }),
                 ),
                 (
@@ -1151,7 +1166,7 @@ pub fn init_prelude(env: &Env) {
                                                     if let Some(caps) = re.captures(&s) {
                                                         for i in 0..caps.len() {
                                                             if let Some(g) = caps.get(i) {
-                                                                groups.push(Value::String(
+                                                                groups.push(Value::string(
                                                                     g.as_str().to_string(),
                                                                 ));
                                                             }
@@ -1170,7 +1185,7 @@ pub fn init_prelude(env: &Env) {
                                                             ),
                                                             (
                                                                 Name::new("groups"),
-                                                                Value::List(groups),
+                                                                Value::list(groups),
                                                             ),
                                                         ],
                                                     ))
@@ -1188,8 +1203,8 @@ pub fn init_prelude(env: &Env) {
                                         Name::new("replace"),
                                         func2(move |repl, s| match (&repl, &s) {
                                             (Value::String(repl), Value::String(s)) => Ok(
-                                                Value::String(
-                                                    re2.replace_all(s, repl.as_str()).to_string(),
+                                                Value::string(
+                                                    re2.replace_all(s.as_str(), repl.as_str()).to_string(),
                                                 ),
                                             ),
                                             (Value::String(_), _) => Err(Value::error(
